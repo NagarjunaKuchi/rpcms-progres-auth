@@ -1,0 +1,114 @@
+openapi: 3.0.3
+info:
+  title: RPCMS ProGres Authentication Adapter (DRAFT)
+  version: 0.1.0
+  description: |
+    DRAFT contract for the RPCMS-side adapter. It exposes an authentication-only
+    interface: the response is a boolean result plus a transaction reference.
+    No personal data from ProGres v4 is returned or stored.
+    The upstream ProGres v4 interface is UNCONFIRMED; this contract defines what
+    RPCMS requires, not what UNHCR provides.
+    Biometric data is held in memory for the call only. It must never be logged,
+    queued or persisted.
+servers:
+  - url: https://rpcms.example.org/api/v1
+security:
+  - mtlsDevice: []
+    bearerOfficer: []
+paths:
+  /progres/authenticate:
+    post:
+      operationId: authenticateBeneficiary
+      summary: Authenticate a refugee against ProGres v4 (Yes/No only)
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AuthRequest' }
+      responses:
+        '200':
+          description: Authentication completed (result may be false)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403':
+          description: Token is valid but officer or partner does not match the request context
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '409':
+          description: Idempotency-Key reused with a different request
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        '502':
+          description: ProGres v4 unreachable or returned an invalid response
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '504': { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    mtlsDevice:
+      type: mutualTLS
+    bearerOfficer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Problem:
+      description: Error
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    AuthRequest:
+      type: object
+      required: [progresId, modality, biometric, context]
+      properties:
+        progresId:
+          type: string
+          description: ProGres individual ID read from the card scan.
+          example: UGA-00423318
+        modality:
+          type: string
+          enum: [FACE, FINGERPRINT]
+        biometric:
+          type: object
+          required: [format, data]
+          description: Transit-only. Never logged or stored.
+          properties:
+            format: { type: string, description: Format as supported by ProGres v4 }
+            data: { type: string, format: byte }
+        context:
+          type: object
+          required: [deviceId, officerId, partnerId, capturedAt]
+          properties:
+            deviceId: { type: string }
+            officerId: { type: string }
+            partnerId: { type: string }
+            capturedAt: { type: string, format: date-time }
+    AuthResponse:
+      type: object
+      required: [authenticated, txnRef, timestamp]
+      description: No name, photo, date of birth, household or case data is returned.
+      properties:
+        authenticated: { type: boolean }
+        recordActive: { type: boolean }
+        txnRef: { type: string, example: PGV4-AUTH-20260305-9A61C2 }
+        timestamp: { type: string, format: date-time }
+    Problem:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
